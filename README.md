@@ -1,6 +1,8 @@
 fork-futures
 ============
 
+[![PyPI](https://img.shields.io/pypi/v/fork_futures.svg)](https://pypi.org/project/fork-futures/)
+
 Provides an alternative to [`concurrent.futures.ProcessPoolExecutor`][ProcessPoolExecutor] implemented
 using fork.
 
