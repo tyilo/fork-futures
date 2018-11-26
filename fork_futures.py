@@ -2,6 +2,7 @@ from concurrent.futures import Executor
 import os
 import pickle
 import signal
+import multiprocessing
 
 
 class ForkFuture:
@@ -13,13 +14,14 @@ class ForkFuture:
 		if pid == 0:
 			os.close(r)
 			try:
-				try:
-					result = (True, fn(*args, **kwargs))
-				except BaseException as e:
-					result = (False, e)
+				with executor.semaphore:
+					try:
+						result = (True, fn(*args, **kwargs))
+					except BaseException as e:
+						result = (False, e)
 
-				with os.fdopen(w, 'wb') as f:
-					pickle.dump(result, f)
+					with os.fdopen(w, 'wb') as f:
+						pickle.dump(result, f)
 			finally:
 				# Make sure no finally or __exit__ handlers are called
 				os.kill(os.getpid(), signal.SIGTERM)
@@ -99,7 +101,18 @@ class ForkFuture:
 
 
 class ForkPoolExecutor(Executor):
-	def __init__(self):
+	def __init__(self, max_workers=None):
+		if max_workers == None:
+			try:
+				max_workers = multiprocessing.cpu_count()
+			except NotImplementedError:
+				max_workers = 1
+
+		if max_workers <= 0:
+			raise ValueError('max_workers must be greater than 0')
+
+		self.max_workers = max_workers
+		self.semaphore = multiprocessing.Semaphore(max_workers)
 		self.worker_pids = set()
 
 	def submit(self, fn, *args, **kwargs):
