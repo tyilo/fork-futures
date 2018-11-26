@@ -6,7 +6,7 @@ import signal
 
 class ForkFuture:
 	def __init__(self, executor, fn, *args, **kwargs):
-		self.executor = executor
+		self._executor = executor
 
 		r, w = os.pipe()
 		pid = os.fork()
@@ -24,15 +24,15 @@ class ForkFuture:
 				# Make sure no finally or __exit__ handlers are called
 				os.kill(os.getpid(), signal.SIGTERM)
 		else:
-			self.done = False
-			self.result = None
-			self.exception = None
-			self.done_callbacks = []
+			self._done = False
+			self._result = None
+			self._exception = None
+			self._done_callbacks = []
 
 			os.close(w)
-			self.fd = r
-			self.worker_pid = pid
-			executor.worker_pids.add(pid)
+			self._fd = r
+			self._worker_pid = pid
+			self._executor.worker_pids.add(pid)
 
 	def _callback(self, f):
 		try:
@@ -42,51 +42,51 @@ class ForkFuture:
 			pass
 
 	def _wait(self, timeout=None):
-		if self.done:
+		if self._done:
 			return
 
-		with os.fdopen(self.fd, 'rb') as f:
+		with os.fdopen(self._fd, 'rb') as f:
 			success, result = pickle.load(f)
-			self.executor.worker_pids.remove(self.worker_pid)
+			self._executor.worker_pids.remove(self._worker_pid)
 
 			if success:
-				self.result = result
+				self._result = result
 			else:
-				self.exception = result
+				self._exception = result
 
-		self.done = True
-		for f in self.done_callbacks:
+		self._done = True
+		for f in self._done_callbacks:
 			self._callback(f)
 
-		self.done_callbacks = None
+		self._done_callbacks = None
 
 	def result(self, timeout=None):
 		self._wait(timeout)
-		if self.exception != None:
-			raise self.exception
+		if self._exception != None:
+			raise self._exception
 		else:
-			return self.result
+			return self._result
 
 	def exception(self, timeout=None):
-		return self.exception
+		return self._exception
 
 	def add_done_callback(self, fn):
-		if self.done:
+		if self._done:
 			self._callback(fn)
 		else:
-			self.done_callbacks += [fn]
+			self._done_callbacks += [fn]
 
 	def cancel(self):
-		return self.done
+		return self._done
 
 	def cancelled(self):
 		return False
 
 	def running(self):
-		return not self.done
+		return not self._done
 
 	def done(self):
-		return self.done
+		return self._done
 
 	def set_running_or_notify_cancel(self):
 		raise NotImplementedError()
