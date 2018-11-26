@@ -7,6 +7,7 @@ import signal
 class ForkFuture:
 	def __init__(self, executor, fn, *args, **kwargs):
 		self.executor = executor
+
 		r, w = os.pipe()
 		pid = os.fork()
 		if pid == 0:
@@ -23,23 +24,78 @@ class ForkFuture:
 				# Make sure no finally or __exit__ handlers are called
 				os.kill(os.getpid(), signal.SIGTERM)
 		else:
+			self.done = False
+			self.result = None
+			self.exception = None
+			self.done_callbacks = []
+
 			os.close(w)
 			self.fd = r
 			self.worker_pid = pid
 			executor.worker_pids.add(pid)
 
-	def cancel(self):
-		pass
+	def _callback(self, f):
+		try:
+			f(self)
+		except Exception as e:
+			print(f'Got exception from callback: {e}')
+			pass
 
-	def result(self):
+	def _wait(self, timeout=None):
+		if self.done:
+			return
+
 		with os.fdopen(self.fd, 'rb') as f:
 			success, result = pickle.load(f)
 			self.executor.worker_pids.remove(self.worker_pid)
 
 			if success:
-				return result
+				self.result = result
 			else:
-				raise result
+				self.exception = result
+
+		self.done = True
+		for f in self.done_callbacks:
+			self._callback(f)
+
+		self.done_callbacks = None
+
+	def result(self, timeout=None):
+		self._wait(timeout)
+		if self.exception != None:
+			raise self.exception
+		else:
+			return self.result
+
+	def exception(self, timeout=None):
+		return self.exception
+
+	def add_done_callback(self, fn):
+		if self.done:
+			self._callback(fn)
+		else:
+			self.done_callbacks += [fn]
+
+	def cancel(self):
+		return self.done
+
+	def cancelled(self):
+		return False
+
+	def running(self):
+		return not self.done
+
+	def done(self):
+		return self.done
+
+	def set_running_or_notify_cancel(self):
+		raise NotImplementedError()
+
+	def set_result(self, result):
+		raise NotImplementedError()
+
+	def set_exception(self, result):
+		raise NotImplementedError()
 
 
 class ForkPoolExecutor(Executor):
